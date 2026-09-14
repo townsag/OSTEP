@@ -1,0 +1,102 @@
+## Ch 23: Complete Virtual Memory Systems
+### Summary:
+### Terms:
+- memory management system examples
+    - VAX:
+        - used the hybrid approach of paging and segmentation
+            - the OS used a page table to virtualize user space memory
+        - split the memory address space evenly between user space memory for code, stack, and heap and kernel memory
+            - this is odd right
+        - needed to reduce memory pressure because the page size was so small
+            - this would result in frequent page faults
+        - approaches for reducing memory pressure
+            - reduce the size of the per process page tables
+                - split the per process page tables into two, each growing towards the center
+                - smaller page tables means more space in memory is available
+            - put page tables for user processes in kernel space memory
+        - address space construction
+            - the kernel address space is mapped into virtual memory below the user address space
+                - this is allowed by partitioning the virtual address space into 4 parts: user heap, user stack, system, unused
+                - this allows the kernel to perform actions like reading from disk using data passed from the user program without having to context switch to the kernel address space from the user address space
+                - upon a context switch the user memory partitions were swapped out but the system memory partition stayed
+                    - the system memory partition has it's own page table that is shared between all processes
+            - virtualizing the memory space of the kernel makes it much easier to swap pages of kernel space memory to disk
+            - the page table indicated the level of permission needed to modify a system page
+        - page table entries:
+            - contained: valid bit, protection field (4 bits), dirty bit, OS field (5 bits), PFN
+            - the lack of a referenced bit (indicates that a page was recently used) prevents hardware support for page replacement algorithms that require the history of page use
+            - they used segmented FIFO page replacement policy
+                - use fifo to decide which page to evict
+                - place evicted pages in a second FIFO queue
+                    - on for either clean or dirty pages
+                    - these page lists are global (shared between processes)
+                - if a process needs to allocate a new page of memory it first looks for a page of memory in the global clean pages list
+                    - the process can reclaim that page of memory from the global clean pages list if it had previously evicted that page of memory
+        - clustering:
+            - the OS can bulk write dirty pages to disk to make them clean
+        - demand zeroing:
+            - when the page is requested from the OS by the process the process creates an entry for the page in the process page table but does not find a physical frame for that page
+                - the init status of the page is stored in the page table
+            - only when the page is accessed the first time does the OS find a physical frame for this page then zero out the original contents of the physical frame
+            - prevents the OS from having to do any work to find pages that the process is never going to use
+        - copy on write:
+            - when a page needs to be copied from one address space to another, the physical frame can be shared between each address space and marked as read only
+            - only copy the contents of the page into a second physical frame when either of the two processes using the page needs to modify the page contents
+    - Linux:
+        - the linux memory address space is split into user portion and kernel portion with the user portion changing upon a context switch and the kernel portion staying the same
+            - the kernel portion holds heaps and stacks 
+        - kernel logical address:
+            - cannot be swapped to disk
+                - this means that these pages are mapped to physical frames of memory at all times
+                - I bet the page table lives here
+            - the normal virtual address space of the kernel
+            - the mapping between logical addresses and physical addresses only requires applying an offset
+                - this means that kernel logical memory is contiguous
+                - suitable for DMA
+        - kernel virtual address:
+            - non contiguous virtual memory that uses a page table 
+        - page table structure:
+            - the hardware manages the page table 
+            - per process multi level page table
+            - resides in kernel logical address memory
+            - OS creates page table structure then hands off pointers to the MMU of the processor
+            - 4 levels in the page table
+                - only 48 of the 64 bit virtual address is used
+                - 4 of 8 bit page table indexes are used to traverse the 4 level page table to find the physical frame number
+                - 12 bit offset into the physical frame
+                    - 4kb pages are addressable 
+        - huge pages:
+            - large contiguous pages
+            - benefits:
+                - fewer mappings in the page table and the TLB
+                - higher chance of TLB hit when translating VPN to PFN
+                - allocating large chunks of memory is faster if the contiguous memory is available because fewer page table entries are created
+            - costs:
+                - huge pages suffer from internal fragmentation if they are underutilized by the calling application
+        - the page cache:
+            - unified: shares pages from multiple sources
+                - memory mapped files
+                - file data and metadata
+                - anonymous memory:
+                    - heap and stack pages that comprise each process
+                    - called anonymous because they are ephemeral, backed by swap space
+            - keeps track of dirty / clean status of pages and periodically flushes dirty pages to disk
+            - replacement algorithm:
+                - modified 2Q:
+                    - the first time that a page is accessed, it is places in the inactive list
+                    - when the page is accessed a second time, it is moved from the inactive list to the active list
+                    - replacement candidates are taken from the inactive list
+                    - pages are moved from the bottom of the active list to the inactive list
+                    - lists are managed in approximate LRU order using clock algorithm
+                - this is meant to prevent flooding, when one process iteratively reads pages just once, this results in all of the other pages being evicted from memory even though these pages will only be accessed once
+                    - pages that are not re referenced should not flush active pages
+            - mmap is used by the OS to link code dependencies and create the stack and heap
+        - security:
+            - buffer overflow attack
+                - a program may sometimes copy untrusted input into a buffer. If that input is larger than the buffer, then the untrusted input will overwrite other data in the address space
+                - this overwritten data can be executable code that allows the bad actor to gain some sort of influence over the machine
+                - overwriting the stack with a series of clever return instructions can allow an attacker to piece together malicious code from a processes dependencies
+                    - solved by randomizing the layout of the virtual address space, 
+            - kernel page table isolation
+                - remove the kernel space memory from user processes so that intermediate state of performing operations via speculative execution is not left over in places that user space programs can access
+### Questions:
