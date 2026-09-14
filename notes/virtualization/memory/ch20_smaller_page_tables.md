@@ -1,0 +1,71 @@
+## Ch20: Paging: Smaller Tables
+### Summary:
+Virtualizing memory requires fast access to and efficient storage of the virtual page number to physical frame number mapping. The page table stores the mapping between the VPN and PFN. The TLB reduces the runtime overhead of accessing that mapping by caching popular VPN -> PFN mappings in the MMU on the CPU. The mapping between the VPN and PFN is stored efficiently using a multi level page table. This reduces the memory overhead associated with storing the mapping.
+### Terms:
+- linear page table:
+    - this is an array of all the locations of physical pages in main memory, they are addressed by their virtual page number like:
+        - LPT[virtual page number] = physical page number
+    - The size of the linear page table is equal to the product of the size of a page table entry and the number of virtual pages 
+        - size = size of entry * 2^(len of virtual page number)
+        - the average page size is 4kb to 8kb
+- hybrid approach
+    - how can we combine segmentation and paging so that we may efficiently virtualize memory
+        - provide the abstraction of a memory space that is larger than physical memory
+        - allow the application to access physical memory quickly
+    - use a base and bound register to denote the start and end of the page table in the kernel memory 
+        - as more pages are needed, this corresponds to either the stack or the heap growing, more physical pages can be associated with virtual pages in the page table and the page table can be expanded
+        - copy the page table into a new larger portion of kernel memory
+        - set the base pointer to the new start of the page table
+        - set the bound pointer to the new end of the page table
+        - the MMU stores the base and bounds pointer for the page table associated with each segment of the memory space for the current running process
+            - the associated page table segment is still a linear page table
+        - the segment bits at the 2 MSBs of the virtual address determine which segment the address is in
+    - the resulting saving is that entries associated with unallocated pages in the page table between the stack and the heap no longer take up space in the page table
+        - high runtime overhead associated with resizing the page table segment
+    - need to use two different memory management techniques
+        - paging to manage application memory, segmentation to manage page table memory
+        - the cure becomes the disease
+- multi level page tables
+    - divide the page table into page sized pieces
+    - the page directory holds a mapping between ranges of the page table and either the location of the page associated with that range of the page table or nothing
+        - each range of the page table is itself a page in memory, has it's own physical frame number (PFN)
+        - there will be nothing if there is not a single allocated page in that range of pages in the page table
+        - the valid bit of the page directory entry (PDE) indicates that at least one page in the portion of the page table associated with that physical frame number is valid
+            - in order for an entry in a page table frame to be valid, there must be a physical frame associated with that virtual page number
+        - indexing into the page directory
+            - the page directory holds as many pages as there are page table entries divided by the number of page table entries that will fit on a single page
+            - the page table page that holds the entry for a virtual page number can be found by taking the n most significant bits of the virtual page number where 2^n = the number of page table pages (also the number of page directory entries)
+            - on a hit in the page directory, meaning that page is valid
+                - follow the pointer in the page directory to the page table page that stores the page table entry associated with this VPN
+                - the bits in the VPN that are not part of the page directory index are the offset into the page table frame indicating the place where we store the page table entry
+    - this is a lot like a b-tree of depth 1
+    - the page directory means that the page table array no longer needs to be one contiguous piece of physical memory
+        - the page directory is much smaller than the page table, it must be one piece of physical memory
+        - the page directory can point to page table chunks that are allocated anywhere in memory
+    - there is overhead associated with using the page directory
+        - TLB cache misses now resolve to a read of the page directory and a read of the page table entry associated with the missing page 
+        - twice as much time but a few orders of magnitude less space
+    - there are some upsides:
+        - we only have to allocate memory for the pages in the page directory associated with virtual page numbers that are actually in use
+        - our use of page table resources is proportional to the processes actual use of memory
+        - don't need contiguous memory for the page table
+            - east to grow the page table using page directory indirection
+            - no external fragmentation caused by variable sized page tables
+- n level page tables:
+    - sometimes we want to store more information that will fit in just a two level page table
+    - the page directory is constrained to fit in just one page of memory, this creates the upper limit on the number of pages that can be addressed by the page directory
+    - if the page directory would need to store more values that can fit into one page, instead split the page directory into many pages and add a second layer of indirection on top of the page directory pages
+    - split the virtual page number into:
+        - page directory layer zero index
+            - this is the index into the top layer of the page directory
+            - the page directory layer zero entry will hold the memory address of another level of page directory pages
+        - page directory layer one index
+            - this is the index into the oneth layer of the page directory
+            - the page directory layer one entry will hold the memory address of a page table frame
+        - page page table index 
+            - this is the offset into the page table frame at which we will find the page table entry
+    - this adds an extra layer of indirection on top of the original page directory formulation for 3 layers of indirection
+
+### Questions:
+- Are page directory entries physical frame numbers or virtual page numbers
+    - kernel owned physical memory unless swapped to disk

@@ -1,0 +1,76 @@
+## Ch 28: Locks
+Locks are used to provide mutually exclusive access to a resource. The implementation of a lock must ballance all the priorities of the lock user: correctness, performance, fairness. Early locks were correct but their use of spinning as a primary mechanism for waiting for the lock led them to be neither fair or performant. Hardware support allowed developers to create more efficient locks. These locks made use of system calls which sleep and schedule threads by their process ID to build a queue of threads to access the lock.
+### Summary:
+- locks are variables in memory
+    - holds the state of the lock
+    - available or acquired
+- internally the lock may hold data structures like a queue of threads that need to access the lock
+- from the perspective of POSIX a lock is a mutex
+- evaluating locks:
+    - mutual exclusion: basic functionality
+    - fairness: does each thread contending on the lock have a fair shot at acquiring the lock
+        - can lead to starvation, when a thread never gets the lock
+        - this are like liveness in a distributed system
+    - performance: does using the lock come with significant runtime overhead
+        - does the performance of the log degrade as the contention on the lock increases
+        - does the lock work well in both the case that there is one cpu running two threads or two cpus running two threads
+- an early approach to locks for single threaded systems disabled hardware interrupts in the critical section
+    - this doesn't work for like 100 reasons
+    - what if we want to make a system call in the critical section, the OS could schedule another thread anyways
+    - what if the user space process never turns interrupts back on?
+    - this really only makes sense inside of the OS, the os can disable interrupts when performing a context switch
+- spin waiting:
+    - if a thread does not have the lock and it is waiting for the lock, it can iteratively check the lock until the lock is available
+    - this is very wasteful and inefficient
+    - in the case of a single core processor, the spin waiting thread is blocking the thread that has the lock
+- test-and-set / atomic exchange:
+    - many instruction sets have support for an atomic instruction that updates the value of a piece of memory and returns the previous value of that piece of memory atomically
+    - this is like a simultaneous read and write
+- spin lock:
+    - a spin lock can be built using atomic test and set
+    - use a while loop to iteratively atomically set the lock to claimed and succeed when the returned previous value of the lock was not claimed
+    - stop iterating when the lock is claimed
+    - evaluation:
+        - spin locks are correct, they provide mutual exclusion
+        - spin locks are not fair, they depend on the OS scheduler to schedule a waiting process when the lock is available 
+            - no guarantee that this will happen
+        - spin locks are not performant, they perform a busy wait for the lock
+            - not too bad on multi core systems where the number of threads is roughly equivalent to the number of cores
+- compare-and-swap:
+    - check the value of a byte in memory, update that byte 
+- load-linked:
+    - fetches a value from memory and places that value in a register
+- store-conditional:
+    - stores a value in the given memory address if no other intervening store has taken place at that memory address
+        - returns the status of the store
+- fetch and add:
+    - atomically increments a value at an address in memory and returns the old value at that address
+    - this can be used to create a fair spin lock
+    - taking the lock requires incrementing the shared value to get a ticket number then spinning until the turn flag is set to your turn
+    - releasing the lock requires incrementing the turn
+- preventing spinning
+    - one approach is to yield to the OS when you are waiting for the lock to be available at it is not available
+    - yield moves the thread state from running to ready, let the os schedule it at some later time slice
+    - still requires a time slice
+    - has no guarantee of fairness
+    - OS support:
+        - park()
+            - puts the calling thread to sleep
+        - unpark(threadID)
+            - wake up the calling thread
+        - we can create a queue of thread ids that are waiting to be scheduled
+        - each thread contends for a spin lock to add themselves to the queue then goes to sleep
+            - spin on the guard lock
+        - when a thread unlocks, they wake up the next thread in the queue of thread ids
+            - unlocking requires spinning on the guard lock
+        - the time spent holding the guard lock is very short in all cases so it is unlikely that the thread will be preempted while in the critical section protected by the guard lock
+- futex:
+    - similar to the mixed spin lock provided by solaris but with more kernel support
+    - futex_wait(address, expected)
+        - put the calling thread to sleep if the value in the given address is equal to the expected value
+        - otherwise return immediately
+    - futex_wake(address) wake up one of the threads waiting on that address
+
+### Terms:
+### Questions:
+- if the OS disables interrupts, what happens to the events that happened while interrupts were disabled
